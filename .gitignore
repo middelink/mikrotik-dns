@@ -1,0 +1,6 @@
+*.exe
+*.test
+*.prof
+
+mikrotik-dns
+run.sh

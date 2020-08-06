@@ -1,0 +1,19 @@
+language: go
+
+go:
+  - 1.15.x
+  - tip
+
+branches:
+  only:
+    - master
+
+before_install:
+  - go version
+  - go env
+  - go get github.com/mattn/goveralls
+
+script:
+  - go get .
+  - go vet .
+  - $GOPATH/bin/goveralls -service=travis-ci
