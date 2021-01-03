@@ -5,6 +5,7 @@
 [![Build Status](https://travis-ci.org/middelink/mikrotik-dns.svg?branch=master)](https://travis-ci.org/middelink/mikrotik-dns)
 [![Coverage Status](https://coveralls.io/repos/github/middelink/mikrotik-dns/badge.svg?branch=master)](https://coveralls.io/github/middelink/mikrotik-dns?branch=master)
 [![Go Report Card](https://goreportcard.com/badge/github.com/middelink/mikrotik-dns)](https://goreportcard.com/report/github.com/middelink/mikrotik-dns)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fmiddelink%2Fmikrotik-dns.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fmiddelink%2Fmikrotik-dns?ref=badge_shield)
 
 ## TL;DR
 
@@ -105,3 +106,7 @@ I presume you have a working experiance with go.
   give it at least the `read`, `write` and `api` policies.
 * Create a user on your mikrotik (system > users; users) and have it
   belong to the group you just created.
+
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fmiddelink%2Fmikrotik-dns.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fmiddelink%2Fmikrotik-dns?ref=badge_large)
