@@ -157,7 +157,11 @@ Unknown entries from the DHCP table will be removed!
 						}
 					}
 					if server != "" {
-						MACs = append(MACs, DHCP{Comment: rr.Header().Name, Server: server, IP: rr.(*dns.A).A, MAC: hw})
+						suffix := ""
+						if _, ok := cmtMap["static"]; ok {
+							suffix = " (static)"
+						}
+						MACs = append(MACs, DHCP{Comment: rr.Header().Name + suffix, Server: server, IP: rr.(*dns.A).A, MAC: hw})
 					} else if *verbose {
 						fmt.Printf("[WARNING] Could not find a matching dhcp server for ip %v\n", rr.(*dns.A).A)
 					}

@@ -45,6 +45,10 @@ type DHCP struct {
 	MAC     net.HardwareAddr
 }
 
+func (d DHCP) String() string {
+	return fmt.Sprintf("{%q %v %v %v}", d.Comment, d.Server, d.IP, d.MAC)
+}
+
 // Setup a deadline on the connection to the Mikrotik. It returns a cancel
 // function, resetting the idle deadline on the connection.
 func (mt *Mikrotik) startDeadline(duration time.Duration) func() {
