@@ -33,8 +33,6 @@ type Mikrotik struct {
 	Address string
 	User    string
 	Passwd  string
-
-	banlist string
 }
 
 // DHCP contains a single dhcp entry.
@@ -52,8 +50,8 @@ func (d DHCP) String() string {
 // Setup a deadline on the connection to the Mikrotik. It returns a cancel
 // function, resetting the idle deadline on the connection.
 func (mt *Mikrotik) startDeadline(duration time.Duration) func() {
-	mt.conn.SetDeadline(time.Now().Add(duration))
-	return func() { mt.conn.SetDeadline(time.Time{}) }
+	_ = mt.conn.SetDeadline(time.Now().Add(duration))
+	return func() { _ = mt.conn.SetDeadline(time.Time{}) }
 }
 
 // NewMikrotik returns an initialized Mikrotik object.
@@ -335,34 +333,34 @@ func (mt *Mikrotik) AddDNS(rr dns.RR, comment string) error {
 	switch rr.Header().Rrtype {
 	case dns.TypeA:
 		// dns entry: "!re @ [{`.id` `*1`} {`name` `router.polyware.nl`} {`type` `A`} {`address` `192.168.10.1`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
-		args = append(args, fmt.Sprintf("=type=A"))
+		args = append(args, "=type=A")
 		args = append(args, fmt.Sprintf("=address=%s", rr.(*dns.A).A))
 	case dns.TypeAAAA:
 		// dns entry: "!re @ [{`.id` `*6`} {`name` `rp1.polyware.nl`} {`type` `AAAA`} {`address` `2a02:58:96:ab00:2dda:94ea:a768:a3e5`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
-		args = append(args, fmt.Sprintf("=type=AAAA"))
+		args = append(args, "=type=AAAA")
 		args = append(args, fmt.Sprintf("=address=%s", rr.(*dns.AAAA).AAAA))
 	case dns.TypeCNAME:
-		args = append(args, fmt.Sprintf("=type=CNAME"))
+		args = append(args, "=type=CNAME")
 		args = append(args, fmt.Sprintf("=cname=%s", rr.(*dns.CNAME).Target))
 	case dns.TypeMX:
 		// dns entry: "!re @ [{`.id` `*13`} {`name` `2`} {`type` `MX`} {`mx-preference` `50`} {`mx-exchange` `smtp.polyware.nl`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
-		args = append(args, fmt.Sprintf("=type=MX"))
+		args = append(args, "=type=MX")
 		args = append(args, fmt.Sprintf("=mx-preference=%d", rr.(*dns.MX).Preference))
 		args = append(args, fmt.Sprintf("=mx-exchange=%s", rr.(*dns.MX).Mx))
 	case dns.TypeNS:
 		// dns entry: "!re @ [{`.id` `*16`} {`name` `5`} {`type` `NS`} {`ns` `something`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
-		args = append(args, fmt.Sprintf("=type=NS"))
+		args = append(args, "=type=NS")
 		args = append(args, fmt.Sprintf("=ns=%s", rr.(*dns.NS).Ns))
 	case dns.TypeSRV:
 		// dns entry: "!re @ [{`.id` `*14`} {`name` `3`} {`type` `SRV`} {`srv-priority` `1`} {`srv-weight` `2`} {`srv-port` `1883`} {`srv-target` `rp1.polyware.nl`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
-		args = append(args, fmt.Sprintf("=type=SRV"))
+		args = append(args, "=type=SRV")
 		args = append(args, fmt.Sprintf("=srv-priority=%d", rr.(*dns.SRV).Priority))
 		args = append(args, fmt.Sprintf("=srv-weight=%d", rr.(*dns.SRV).Weight))
 		args = append(args, fmt.Sprintf("=srv-port=%d", rr.(*dns.SRV).Port))
 		args = append(args, fmt.Sprintf("=srv-target=%s", rr.(*dns.SRV).Target))
 	case dns.TypeTXT:
 		//dns entry: "!re @ [{`.id` `*15`} {`name` `4`} {`type` `TXT`} {`text` `spf thingy`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
-		args = append(args, fmt.Sprintf("=type=TXT"))
+		args = append(args, "=type=TXT")
 		args = append(args, fmt.Sprintf("=text=%s", strings.Join(rr.(*dns.TXT).Txt, "\n")))
 	default:
 		return fmt.Errorf("unknown dns type: %v", rr)

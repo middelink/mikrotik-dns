@@ -103,10 +103,7 @@ Unknown entries from the DHCP table will be removed!
 	zoneRRs := []dns.RR{}
 	MACs := []DHCP{}
 	for _, zonefile := range flag.Args() {
-		origin := filepath.Base(zonefile)
-		if strings.HasSuffix(origin, ".db") {
-			origin = origin[:len(origin)-3]
-		}
+		origin := strings.TrimSuffix(filepath.Base(zonefile), ".db")
 
 		stream, _ := os.Open(zonefile)
 		scanner := dns.NewZoneParser(stream, origin, zonefile)
