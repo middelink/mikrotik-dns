@@ -165,6 +165,11 @@ func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
 	rrs := make(map[string]dns.RR, len(reply.Re))
 	var rr dns.RR
 	for _, re := range reply.Re {
+		ttl := toDuration(re.Map["ttl"])
+		name := re.Map["name"]
+		if v, ok := re.Map["regexp"]; ok {
+			name = v
+		}
 		switch re.Map["type"] {
 		case "": // mikrotik 6.47.3+ no longer return the type for "A" records. (Why? Is it the default?)
 			fallthrough
@@ -172,26 +177,26 @@ func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
 			// dns entry: "!re @ [{`.id` `*1`} {`name` `router.polyware.nl`} {`type` `A`} {`address` `192.168.10.1`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
 			// dns.A{Hdr:dns.RR_Header{Name:"router.polyware.nl", Rrtype:0x1, Class:0x1, Ttl:0x15180, Rdlength:0x0}, A:net.IP(nil)}
 			r := new(dns.A)
-			r.Hdr = dns.RR_Header{Name: re.Map["name"], Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: toDuration(re.Map["ttl"])}
+			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: ttl}
 			r.A = net.ParseIP(re.Map["address"])
 			rr = r
 		case "AAAA":
 			// dns entry: "!re @ [{`.id` `*6`} {`name` `rp1.polyware.nl`} {`type` `AAAA`} {`address` `2a02:58:96:ab00:2dda:94ea:a768:a3e5`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
 			// dns.AAAA{Hdr:dns.RR_Header{Name:"rp1.polyware.nl", Rrtype:0x1c, Class:0x1, Ttl:0x15180, Rdlength:0x0}, AAAA:net.IP(nil)}
 			r := new(dns.AAAA)
-			r.Hdr = dns.RR_Header{Name: re.Map["name"], Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: toDuration(re.Map["ttl"])}
+			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: ttl}
 			r.AAAA = net.ParseIP(re.Map["address"])
 			rr = r
 		case "CNAME":
 			r := new(dns.CNAME)
-			r.Hdr = dns.RR_Header{Name: re.Map["name"], Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: toDuration(re.Map["ttl"])}
+			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: ttl}
 			r.Target = re.Map["cname"]
 			rr = r
 		case "MX":
 			// dns entry: "!re @ [{`.id` `*13`} {`name` `2`} {`type` `MX`} {`mx-preference` `50`} {`mx-exchange` `smtp.polyware.nl`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
 			// dns.MX{Hdr:dns.RR_Header{Name:"2", Rrtype:0xf, Class:0x1, Ttl:0x15180, Rdlength:0x0}, Preference:0x0, Mx:""}
 			r := new(dns.MX)
-			r.Hdr = dns.RR_Header{Name: re.Map["name"], Rrtype: dns.TypeMX, Class: dns.ClassINET, Ttl: toDuration(re.Map["ttl"])}
+			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeMX, Class: dns.ClassINET, Ttl: ttl}
 			pref, _ := strconv.Atoi(re.Map["mx-preference"])
 			r.Preference = uint16(pref)
 			r.Mx = re.Map["mx-exchange"]
@@ -200,7 +205,7 @@ func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
 			// dns entry: "!re @ [{`.id` `*16`} {`name` `5`} {`type` `NS`} {`ns` `something`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
 			// dns.NS{Hdr:dns.RR_Header{Name:"5", Rrtype:0x2, Class:0x1, Ttl:0x15180, Rdlength:0x0}, Ns:""}
 			r := new(dns.NS)
-			r.Hdr = dns.RR_Header{Name: re.Map["name"], Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: toDuration(re.Map["ttl"])}
+			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: ttl}
 			r.Ns = re.Map["ns"]
 			rr = r
 		case "SRV":
@@ -210,7 +215,7 @@ func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
 			weight, _ := strconv.Atoi(re.Map["srv-weight"])
 			port, _ := strconv.Atoi(re.Map["srv-port"])
 			r := new(dns.SRV)
-			r.Hdr = dns.RR_Header{Name: re.Map["name"], Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: toDuration(re.Map["ttl"])}
+			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: ttl}
 			r.Priority = uint16(prio)
 			r.Weight = uint16(weight)
 			r.Port = uint16(port)
@@ -220,12 +225,12 @@ func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
 			//dns entry: "!re @ [{`.id` `*15`} {`name` `4`} {`type` `TXT`} {`text` `spf thingy`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
 			// dns.TXT{Hdr:dns.RR_Header{Name:"4", Rrtype:0x10, Class:0x1, Ttl:0x15180, Rdlength:0x0}, Txt:[]string(nil)}
 			r := new(dns.TXT)
-			r.Hdr = dns.RR_Header{Name: re.Map["name"], Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: toDuration(re.Map["ttl"])}
+			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: ttl}
 			r.Txt = []string{re.Map["text"]}
 			rr = r
 		case "(unknown)":
 			r := new(dns.NULL)
-			r.Hdr = dns.RR_Header{Name: re.Map["name"], Rrtype: dns.TypeNULL, Class: dns.ClassINET, Ttl: toDuration(re.Map["ttl"])}
+			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeNULL, Class: dns.ClassINET, Ttl: ttl}
 			rr = r
 		default:
 			return nil, fmt.Errorf("unknown dns type: %v", re)
@@ -325,9 +330,13 @@ func (mt *Mikrotik) AddDNS(rr dns.RR, comment string) error {
 	}
 
 	// Do the physical interaction with the MT.
+	field := "name"
+	if strings.Contains(rr.Header().Name, "*.") {
+		field = "regexp"
+	}
 	args := []string{
 		"/ip/dns/static/add",
-		fmt.Sprintf("=name=%s", rr.Header().Name),
+		fmt.Sprintf("=%s=%s", field, rr.Header().Name),
 		fmt.Sprintf("=ttl=%s", toSeconds(rr.Header().Ttl)),
 	}
 	switch rr.Header().Rrtype {
