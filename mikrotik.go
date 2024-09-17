@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	ros "github.com/go-routeros/routeros"
+	ros "github.com/go-routeros/routeros/v3"
 	"github.com/miekg/dns"
 )
 
