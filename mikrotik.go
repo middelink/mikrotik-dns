@@ -154,6 +154,30 @@ func toSeconds(seconds uint32) string {
 	return str
 }
 
+func nameToRegexp(s string) string {
+	if !strings.HasPrefix(s, "*.") {
+		return s
+	}
+
+	// Detected wildcard RR. See https://en.wikipedia.org/wiki/Wildcard_DNS_record
+	s = s[1:]
+	if strings.HasPrefix(s, ".") {
+		s = s[:len(s)-1]
+	}
+	return "^.*" + strings.ReplaceAll(s, ".", "\\.") + "$"
+}
+
+func regexpToName(s string) string {
+	if strings.HasPrefix(s, "^") {
+		s = s[1:]
+	}
+	s = strings.ReplaceAll(s, ".*", "*")
+	if strings.HasSuffix(s, "$") {
+		s = s[:len(s)-1] + "."
+	}
+	return strings.ReplaceAll(s, "\\.", ".")
+}
+
 func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
 
 	cancel := mt.startDeadline(5 * time.Second)
@@ -168,7 +192,7 @@ func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
 		ttl := toDuration(re.Map["ttl"])
 		name := re.Map["name"]
 		if v, ok := re.Map["regexp"]; ok {
-			name = v
+			name = regexpToName(v)
 		}
 		switch re.Map["type"] {
 		case "": // mikrotik 6.47.3+ no longer return the type for "A" records. (Why? Is it the default?)
@@ -330,13 +354,13 @@ func (mt *Mikrotik) AddDNS(rr dns.RR, comment string) error {
 	}
 
 	// Do the physical interaction with the MT.
-	field := "name"
-	if strings.Contains(rr.Header().Name, "*.") {
-		field = "regexp"
+	cmd := fmt.Sprintf("=name=%s", rr.Header().Name)
+	if strings.HasPrefix(rr.Header().Name, "*.") {
+		cmd = fmt.Sprintf("=regexp=%s", nameToRegexp(rr.Header().Name))
 	}
 	args := []string{
 		"/ip/dns/static/add",
-		fmt.Sprintf("=%s=%s", field, rr.Header().Name),
+		cmd,
 		fmt.Sprintf("=ttl=%s", toSeconds(rr.Header().Ttl)),
 	}
 	switch rr.Header().Rrtype {
