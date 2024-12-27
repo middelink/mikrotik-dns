@@ -160,17 +160,12 @@ func nameToRegexp(s string) string {
 	}
 
 	// Detected wildcard RR. See https://en.wikipedia.org/wiki/Wildcard_DNS_record
-	s = s[1:]
-	if strings.HasPrefix(s, ".") {
-		s = s[:len(s)-1]
-	}
+	s = strings.TrimSuffix(s[1:], ".")
 	return "^.*" + strings.ReplaceAll(s, ".", "\\.") + "$"
 }
 
 func regexpToName(s string) string {
-	if strings.HasPrefix(s, "^") {
-		s = s[1:]
-	}
+	s = strings.TrimPrefix(s, "^")
 	s = strings.ReplaceAll(s, ".*", "*")
 	if strings.HasSuffix(s, "$") {
 		s = s[:len(s)-1] + "."
