@@ -28,7 +28,8 @@ type Mikrotik struct {
 	client *ros.Client
 	lock   sync.Mutex // prevent AddRR/DelRR racing
 
-	Name string
+	Name    string
+	Version float64 // E.g. 7.17
 
 	Address string
 	User    string
@@ -107,6 +108,10 @@ func NewMikrotik(name, address, user, passwd string, useTLS bool) (*Mikrotik, er
 		mt.client.Close()
 		return nil, err
 	}
+	if mt.Version, err = mt.fetchVersion(); err != nil {
+		mt.client.Close()
+		return nil, err
+	}
 
 	if _, err := mt.fetchDNSlist(); err != nil {
 		mt.client.Close()
@@ -167,10 +172,22 @@ func nameToRegexp(s string) string {
 func regexpToName(s string) string {
 	s = strings.TrimPrefix(s, "^")
 	s = strings.ReplaceAll(s, ".*", "*")
-	if strings.HasSuffix(s, "$") {
-		s = s[:len(s)-1] + "."
-	}
+	s = strings.TrimSuffix(s, "$")
 	return strings.ReplaceAll(s, "\\.", ".")
+}
+
+func (mt *Mikrotik) fromFQDN(s string) string {
+	if mt.Version >= 7.17 {
+		return strings.TrimSuffix(s, ".")
+	}
+	return s
+}
+
+func (mt *Mikrotik) toFQDN(s string) string {
+	if mt.Version >= 7.17 {
+		return strings.TrimSuffix(s, ".") + "."
+	}
+	return s
 }
 
 func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
@@ -185,9 +202,9 @@ func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
 	var rr dns.RR
 	for _, re := range reply.Re {
 		ttl := toDuration(re.Map["ttl"])
-		name := re.Map["name"]
+		name := mt.toFQDN(re.Map["name"])
 		if v, ok := re.Map["regexp"]; ok {
-			name = regexpToName(v)
+			name = mt.toFQDN(regexpToName(v))
 		}
 		switch re.Map["type"] {
 		case "": // mikrotik 6.47.3+ no longer return the type for "A" records. (Why? Is it the default?)
@@ -209,7 +226,7 @@ func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
 		case "CNAME":
 			r := new(dns.CNAME)
 			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: ttl}
-			r.Target = re.Map["cname"]
+			r.Target = mt.toFQDN(re.Map["cname"])
 			rr = r
 		case "MX":
 			// dns entry: "!re @ [{`.id` `*13`} {`name` `2`} {`type` `MX`} {`mx-preference` `50`} {`mx-exchange` `smtp.polyware.nl`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
@@ -218,14 +235,14 @@ func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
 			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeMX, Class: dns.ClassINET, Ttl: ttl}
 			pref, _ := strconv.Atoi(re.Map["mx-preference"])
 			r.Preference = uint16(pref)
-			r.Mx = re.Map["mx-exchange"]
+			r.Mx = mt.toFQDN(re.Map["mx-exchange"])
 			rr = r
 		case "NS":
 			// dns entry: "!re @ [{`.id` `*16`} {`name` `5`} {`type` `NS`} {`ns` `something`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
 			// dns.NS{Hdr:dns.RR_Header{Name:"5", Rrtype:0x2, Class:0x1, Ttl:0x15180, Rdlength:0x0}, Ns:""}
 			r := new(dns.NS)
 			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: ttl}
-			r.Ns = re.Map["ns"]
+			r.Ns = mt.toFQDN(re.Map["ns"])
 			rr = r
 		case "SRV":
 			// dns entry: "!re @ [{`.id` `*14`} {`name` `3`} {`type` `SRV`} {`srv-priority` `1`} {`srv-weight` `2`} {`srv-port` `1883`} {`srv-target` `rp1.polyware.nl`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
@@ -238,7 +255,7 @@ func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
 			r.Priority = uint16(prio)
 			r.Weight = uint16(weight)
 			r.Port = uint16(port)
-			r.Target = re.Map["srv-target"]
+			r.Target = mt.toFQDN(re.Map["srv-target"])
 			rr = r
 		case "TXT":
 			//dns entry: "!re @ [{`.id` `*15`} {`name` `4`} {`type` `TXT`} {`text` `spf thingy`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
@@ -349,9 +366,9 @@ func (mt *Mikrotik) AddDNS(rr dns.RR, comment string) error {
 	}
 
 	// Do the physical interaction with the MT.
-	cmd := fmt.Sprintf("=name=%s", rr.Header().Name)
+	cmd := fmt.Sprintf("=name=%s", mt.fromFQDN(rr.Header().Name))
 	if strings.HasPrefix(rr.Header().Name, "*.") {
-		cmd = fmt.Sprintf("=regexp=%s", nameToRegexp(rr.Header().Name))
+		cmd = fmt.Sprintf("=regexp=%s", mt.fromFQDN(nameToRegexp(rr.Header().Name)))
 	}
 	args := []string{
 		"/ip/dns/static/add",
@@ -369,23 +386,23 @@ func (mt *Mikrotik) AddDNS(rr dns.RR, comment string) error {
 		args = append(args, fmt.Sprintf("=address=%s", rr.(*dns.AAAA).AAAA))
 	case dns.TypeCNAME:
 		args = append(args, "=type=CNAME")
-		args = append(args, fmt.Sprintf("=cname=%s", rr.(*dns.CNAME).Target))
+		args = append(args, fmt.Sprintf("=cname=%s", mt.fromFQDN(rr.(*dns.CNAME).Target)))
 	case dns.TypeMX:
 		// dns entry: "!re @ [{`.id` `*13`} {`name` `2`} {`type` `MX`} {`mx-preference` `50`} {`mx-exchange` `smtp.polyware.nl`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
 		args = append(args, "=type=MX")
 		args = append(args, fmt.Sprintf("=mx-preference=%d", rr.(*dns.MX).Preference))
-		args = append(args, fmt.Sprintf("=mx-exchange=%s", rr.(*dns.MX).Mx))
+		args = append(args, fmt.Sprintf("=mx-exchange=%s", mt.fromFQDN(rr.(*dns.MX).Mx)))
 	case dns.TypeNS:
 		// dns entry: "!re @ [{`.id` `*16`} {`name` `5`} {`type` `NS`} {`ns` `something`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
 		args = append(args, "=type=NS")
-		args = append(args, fmt.Sprintf("=ns=%s", rr.(*dns.NS).Ns))
+		args = append(args, fmt.Sprintf("=ns=%s", mt.fromFQDN(rr.(*dns.NS).Ns)))
 	case dns.TypeSRV:
 		// dns entry: "!re @ [{`.id` `*14`} {`name` `3`} {`type` `SRV`} {`srv-priority` `1`} {`srv-weight` `2`} {`srv-port` `1883`} {`srv-target` `rp1.polyware.nl`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
 		args = append(args, "=type=SRV")
 		args = append(args, fmt.Sprintf("=srv-priority=%d", rr.(*dns.SRV).Priority))
 		args = append(args, fmt.Sprintf("=srv-weight=%d", rr.(*dns.SRV).Weight))
 		args = append(args, fmt.Sprintf("=srv-port=%d", rr.(*dns.SRV).Port))
-		args = append(args, fmt.Sprintf("=srv-target=%s", rr.(*dns.SRV).Target))
+		args = append(args, fmt.Sprintf("=srv-target=%s", mt.fromFQDN(rr.(*dns.SRV).Target)))
 	case dns.TypeTXT:
 		//dns entry: "!re @ [{`.id` `*15`} {`name` `4`} {`type` `TXT`} {`text` `spf thingy`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
 		args = append(args, "=type=TXT")
@@ -485,6 +502,23 @@ func (mt *Mikrotik) DelDHCP(entry string) error {
 	cancel()
 
 	return err
+}
+
+// fetchVersion returns the active running firmware version.
+func (mt *Mikrotik) fetchVersion() (float64, error) {
+	cancel := mt.startDeadline(5 * time.Second)
+	reply, err := mt.client.Run("/system/routerboard/print")
+	cancel()
+	if err != nil {
+		return 0, fmt.Errorf("fetchVersion=%v", err)
+	}
+	for _, re := range reply.Re {
+		if v, ok := re.Map["current-firmware"]; ok {
+			version, _ := strconv.ParseFloat(v, 64)
+			return float64(version), nil
+		}
+	}
+	return 0, fmt.Errorf("missing `current-firmware`")
 }
 
 // Close closes the session with the mikrotik.
