@@ -3,7 +3,7 @@ module github.com/middelink/mikrotik-dns
 go 1.21
 
 require (
-	github.com/go-routeros/routeros/v3 v3.0.0
+	github.com/go-routeros/routeros/v3 v3.0.1
 	github.com/miekg/dns v1.1.63
 )
 
