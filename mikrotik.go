@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	ros "github.com/go-routeros/routeros/v3"
 	"github.com/miekg/dns"
 )
@@ -24,12 +25,13 @@ var (
 // details but also the API connection to the Mikrotik. It acts as a cache
 // between the rest of the program and the Mikrotik.
 type Mikrotik struct {
-	conn   net.Conn
-	client *ros.Client
-	lock   sync.Mutex // prevent AddRR/DelRR racing
+	conn     net.Conn
+	client   *ros.Client
+	lock     sync.Mutex // prevent AddRR/DelRR racing
+	needDots bool       // Version >= 7.17
 
 	Name    string
-	Version float64 // E.g. 7.17
+	Version *semver.Version // E.g. 7.17
 
 	Address string
 	User    string
@@ -112,6 +114,13 @@ func NewMikrotik(name, address, user, passwd string, useTLS bool) (*Mikrotik, er
 		mt.client.Close()
 		return nil, err
 	}
+	c, err := semver.NewConstraint(">= 7.17")
+	if err != nil {
+		mt.client.Close()
+		return nil, err
+	}
+	mt.needDots = c.Check(mt.Version)
+	log.Printf("version = %v", mt.Version)
 
 	if _, err := mt.fetchDNSlist(); err != nil {
 		mt.client.Close()
@@ -177,14 +186,14 @@ func regexpToName(s string) string {
 }
 
 func (mt *Mikrotik) fromFQDN(s string) string {
-	if mt.Version >= 7.17 {
+	if mt.needDots {
 		return strings.TrimSuffix(s, ".")
 	}
 	return s
 }
 
 func (mt *Mikrotik) toFQDN(s string) string {
-	if mt.Version >= 7.17 {
+	if mt.needDots {
 		return strings.TrimSuffix(s, ".") + "."
 	}
 	return s
@@ -505,20 +514,19 @@ func (mt *Mikrotik) DelDHCP(entry string) error {
 }
 
 // fetchVersion returns the active running firmware version.
-func (mt *Mikrotik) fetchVersion() (float64, error) {
+func (mt *Mikrotik) fetchVersion() (*semver.Version, error) {
 	cancel := mt.startDeadline(5 * time.Second)
 	reply, err := mt.client.Run("/system/routerboard/print")
 	cancel()
 	if err != nil {
-		return 0, fmt.Errorf("fetchVersion=%v", err)
+		return nil, fmt.Errorf("fetchVersion=%v", err)
 	}
 	for _, re := range reply.Re {
 		if v, ok := re.Map["current-firmware"]; ok {
-			version, _ := strconv.ParseFloat(v, 64)
-			return float64(version), nil
+			return semver.NewVersion(v)
 		}
 	}
-	return 0, fmt.Errorf("missing `current-firmware`")
+	return nil, fmt.Errorf("missing `current-firmware`")
 }
 
 // Close closes the session with the mikrotik.
