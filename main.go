@@ -85,7 +85,7 @@ Unknown entries from the DHCP table will be removed!
 	}()
 
 	var existingRRs map[string]dns.RR
-	if existingRRs, err = mt.fetchDNSlist(ctx); err != nil {
+	if existingRRs, err = mt.FetchDNSlist(ctx); err != nil {
 		log.Fatalf("Unable to fetch existing DNS entries: %v", err)
 	}
 	fmt.Printf("%d existing RRs found\n", len(existingRRs))
@@ -102,7 +102,7 @@ Unknown entries from the DHCP table will be removed!
 
 	var dhcpservers map[string][]*net.IPNet
 	if *useDHCP {
-		dhcpservers, err = mt.fetchDHCPNets(ctx)
+		dhcpservers, err = mt.FetchDHCPNets(ctx)
 		if err != nil {
 			log.Fatalf("Unable to fetch existing DHCP servers: %v", err)
 		}
@@ -220,7 +220,7 @@ Unknown entries from the DHCP table will be removed!
 	}
 
 	if *useDHCP {
-		existingDHCP, _ := mt.fetchDHCP(ctx)
+		existingDHCP, _ := mt.FetchDHCP(ctx)
 		fmt.Printf("%d existing DHCP entries found\n", len(existingDHCP))
 		fmt.Printf("%d zone DHCP entries found\n", len(MACs))
 

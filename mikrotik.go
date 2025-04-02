@@ -105,10 +105,6 @@ func NewMikrotik(ctx context.Context, name, address, user, passwd string, useTLS
 	}
 	mt.needDots = c.Check(mt.Version)
 
-	if _, err := mt.fetchDNSlist(ctx); err != nil {
-		return nil, nil, err
-	}
-
 	return mt, func(ctx context.Context) error { return mt.client.Close() }, nil
 }
 
@@ -199,7 +195,9 @@ func (mt *Mikrotik) toFQDN(s string) string {
 	return s
 }
 
-func (mt *Mikrotik) fetchDNSlist(ctx context.Context) (map[string]dns.RR, error) {
+// FetchDNSList returns a map of resource records, indexed by the name.
+// It handles regexps and ensures names are fqdn (ending with a dot).
+func (mt *Mikrotik) FetchDNSlist(ctx context.Context) (map[string]dns.RR, error) {
 	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	reply, err := mt.client.RunContext(rctx, "/ip/dns/static/print", ".proplist=type")
 	cancel()
@@ -284,8 +282,8 @@ func (mt *Mikrotik) fetchDNSlist(ctx context.Context) (map[string]dns.RR, error)
 	return rrs, nil
 }
 
-// fetchDHCP returns a map of all the static DHCP leases on the Mikrotik.
-func (mt *Mikrotik) fetchDHCP(ctx context.Context) (map[string]DHCP, error) {
+// FetchDHCP returns a map of all the static DHCP leases on the Mikrotik.
+func (mt *Mikrotik) FetchDHCP(ctx context.Context) (map[string]DHCP, error) {
 
 	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	reply, err := mt.client.RunContext(rctx, "/ip/dhcp-server/lease/print")
@@ -305,8 +303,8 @@ func (mt *Mikrotik) fetchDHCP(ctx context.Context) (map[string]DHCP, error) {
 	return macs, nil
 }
 
-// fetchDHCPNets returns a map of active dhcp server and the ip range they listen to.
-func (mt *Mikrotik) fetchDHCPNets(ctx context.Context) (map[string][]*net.IPNet, error) {
+// FetchDHCPNets returns a map of active dhcp server and the ip range they listen to.
+func (mt *Mikrotik) FetchDHCPNets(ctx context.Context) (map[string][]*net.IPNet, error) {
 	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	reply, err := mt.client.RunContext(rctx, "/ip/address/print")
 	cancel()
