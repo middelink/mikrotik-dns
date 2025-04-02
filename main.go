@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/miekg/dns"
 )
@@ -29,7 +31,7 @@ var (
 
 func main() {
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), `Usage: %s [OPTION]... ZONE...
+		_, _ = fmt.Fprintf(flag.CommandLine.Output(), `Usage: %s [OPTION]... ZONE...
 
 When --use_dns is given, this tool copies compatible RRs from the given zones
 into the Mikrotiks static DNS table. This can for example be used in emergency
@@ -70,14 +72,20 @@ Unknown entries from the DHCP table will be removed!
 	}
 
 	passwd, _ := mtURL.User.Password()
-	mt, err := NewMikrotik("first", mtURL.Host, mtURL.User.Username(), passwd, mtURL.Scheme == "apis")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*5)
+	mt, closer, err := NewMikrotik(ctx, "first", mtURL.Host, mtURL.User.Username(), passwd, mtURL.Scheme == "apis")
+	defer cancel()
 	if err != nil {
 		log.Fatalf("Unable to connect to %s: %v", mtURL.Host, err)
 	}
+	defer func() {
+		if err := closer(ctx); err != nil {
+			log.Fatalf("Unable to close Mikrotik session: %v", err)
+		}
+	}()
 
 	var existingRRs map[string]dns.RR
-	if existingRRs, err = mt.fetchDNSlist(); err != nil {
-		mt.client.Close()
+	if existingRRs, err = mt.fetchDNSlist(ctx); err != nil {
 		log.Fatalf("Unable to fetch existing DNS entries: %v", err)
 	}
 	fmt.Printf("%d existing RRs found\n", len(existingRRs))
@@ -94,7 +102,7 @@ Unknown entries from the DHCP table will be removed!
 
 	var dhcpservers map[string][]*net.IPNet
 	if *useDHCP {
-		dhcpservers, err = mt.fetchDHCPNets()
+		dhcpservers, err = mt.fetchDHCPNets(ctx)
 		if err != nil {
 			log.Fatalf("Unable to fetch existing DHCP servers: %v", err)
 		}
@@ -195,7 +203,7 @@ Unknown entries from the DHCP table will be removed!
 		for k, v := range existingRRs {
 			fmt.Printf("%v: %v\n", k, v)
 			if !*debug {
-				if err := mt.DelDNS(k); err != nil {
+				if err := mt.DelDNS(ctx, k); err != nil {
 					log.Printf("unable to remove DNS entry (%v, %v): %v", k, v, err)
 				}
 			}
@@ -204,7 +212,7 @@ Unknown entries from the DHCP table will be removed!
 		for k, v := range zoneRRs {
 			fmt.Printf("%v: %v\n", k, v)
 			if !*debug {
-				if err := mt.AddDNS(v, ""); err != nil {
+				if err := mt.AddDNS(ctx, v, ""); err != nil {
 					log.Printf("unable to add DNS entry (%v, %v): %v", k, v, err)
 				}
 			}
@@ -212,7 +220,7 @@ Unknown entries from the DHCP table will be removed!
 	}
 
 	if *useDHCP {
-		existingDHCP, _ := mt.fetchDHCP()
+		existingDHCP, _ := mt.fetchDHCP(ctx)
 		fmt.Printf("%d existing DHCP entries found\n", len(existingDHCP))
 		fmt.Printf("%d zone DHCP entries found\n", len(MACs))
 
@@ -232,7 +240,7 @@ Unknown entries from the DHCP table will be removed!
 		for k, v := range existingDHCP {
 			fmt.Printf("  %v: %v\n", k, v)
 			if !*debug {
-				if err := mt.DelDHCP(k); err != nil {
+				if err := mt.DelDHCP(ctx, k); err != nil {
 					log.Printf("unable to remove DHCP entry (%v, %v): %v", k, v, err)
 				}
 			}
@@ -242,7 +250,7 @@ Unknown entries from the DHCP table will be removed!
 		for k, v := range MACs {
 			fmt.Printf("  %v: %v\n", k, v)
 			if !*debug {
-				if err := mt.AddDHCP(v); err != nil {
+				if err := mt.AddDHCP(ctx, v); err != nil {
 					log.Printf("unable to add DHCP entry (%v, %v): %v", k, v, err)
 				}
 			}

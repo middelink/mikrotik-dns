@@ -1,7 +1,7 @@
 package main
 
 import (
-	"crypto/tls"
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -25,7 +25,6 @@ var (
 // details but also the API connection to the Mikrotik. It acts as a cache
 // between the rest of the program and the Mikrotik.
 type Mikrotik struct {
-	conn     net.Conn
 	client   *ros.Client
 	lock     sync.Mutex // prevent AddRR/DelRR racing
 	needDots bool       // Version >= 7.17
@@ -50,21 +49,14 @@ func (d DHCP) String() string {
 	return fmt.Sprintf("{%q %v %v %v}", d.Comment, d.Server, d.IP, d.MAC)
 }
 
-// Setup a deadline on the connection to the Mikrotik. It returns a cancel
-// function, resetting the idle deadline on the connection.
-func (mt *Mikrotik) startDeadline(duration time.Duration) func() {
-	_ = mt.conn.SetDeadline(time.Now().Add(duration))
-	return func() { _ = mt.conn.SetDeadline(time.Time{}) }
-}
-
-// NewMikrotik returns an initialized Mikrotik object.
-func NewMikrotik(name, address, user, passwd string, useTLS bool) (*Mikrotik, error) {
+// NewMikrotik returns an initialized Mikrotik object, a closer and an error.
+func NewMikrotik(ctx context.Context, name, address, user, passwd string, useTLS bool) (*Mikrotik, func(context.Context) error, error) {
 	// Add port 8728/8729 if it was not included
 	_, _, err := net.SplitHostPort(address)
 	if err != nil {
 		// For anything else than missing port, bail.
 		if !strings.Contains(err.Error(), "missing port in address") {
-			return nil, fmt.Errorf("%s: malformed address: %v", name, err)
+			return nil, nil, fmt.Errorf("%s: malformed address: %v", name, err)
 		}
 		if useTLS {
 			address = net.JoinHostPort(address, "8729")
@@ -85,51 +77,58 @@ func NewMikrotik(name, address, user, passwd string, useTLS bool) (*Mikrotik, er
 		User:    user,
 		Passwd:  passwd,
 	}
-	// Open the connection, use our own code for this, as we need
-	// access to it for setting deadlines.
-	dialer := new(net.Dialer)
-	dialer.Timeout = time.Minute
+	dialctx, cancel := context.WithTimeout(ctx, time.Minute)
 	if useTLS {
-		mt.conn, err = tls.DialWithDialer(dialer, "tcp", mt.Address, nil)
+		mt.client, err = ros.DialTLSContext(dialctx, mt.Address, mt.User, mt.Passwd, nil)
 	} else {
-		mt.conn, err = dialer.Dial("tcp", mt.Address)
+		mt.client, err = ros.DialContext(dialctx, mt.Address, mt.User, mt.Passwd)
 	}
-	if err != nil {
-		return nil, err
-	}
-	mt.client, err = ros.NewClient(mt.conn)
-	if err != nil {
-		mt.conn.Close()
-		return nil, err
-	}
-
-	cancel := mt.startDeadline(5 * time.Second)
-	err = mt.client.Login(mt.User, mt.Passwd)
 	cancel()
 	if err != nil {
-		mt.client.Close()
-		return nil, err
+		return nil, nil, err
 	}
-	if mt.Version, err = mt.fetchVersion(); err != nil {
-		mt.client.Close()
-		return nil, err
+	defer func() {
+		if err != nil {
+			cerr := mt.client.Close()
+			if cerr != nil {
+				err = fmt.Errorf("error closing object: %w, original error: %w", cerr, err)
+			}
+		}
+	}()
+
+	if mt.Version, err = mt.fetchVersion(ctx); err != nil {
+		return nil, nil, err
 	}
 	c, err := semver.NewConstraint(">= 7.17")
 	if err != nil {
-		mt.client.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	mt.needDots = c.Check(mt.Version)
-	log.Printf("version = %v", mt.Version)
 
-	if _, err := mt.fetchDNSlist(); err != nil {
-		mt.client.Close()
-		return nil, err
+	if _, err := mt.fetchDNSlist(ctx); err != nil {
+		return nil, nil, err
 	}
 
-	return mt, nil
+	return mt, func(ctx context.Context) error { return mt.client.Close() }, nil
 }
 
+// fetchVersion returns the active running firmware version.
+func (mt *Mikrotik) fetchVersion(ctx context.Context) (*semver.Version, error) {
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	reply, err := mt.client.RunContext(rctx, "/system/routerboard/print")
+	cancel()
+	if err != nil {
+		return nil, fmt.Errorf("fetchVersion=%v", err)
+	}
+	for _, re := range reply.Re {
+		if v, ok := re.Map["current-firmware"]; ok {
+			return semver.NewVersion(v)
+		}
+	}
+	return nil, fmt.Errorf("missing `current-firmware`")
+}
+
+// Convert the MT duration of weeks, days, hours, minute and seconds to a single seconds number.
 func toDuration(ttl string) uint32 {
 	res := regTimeout.FindStringSubmatch(ttl)
 	var duration time.Duration
@@ -156,6 +155,7 @@ func toDuration(ttl string) uint32 {
 	return uint32(duration.Seconds())
 }
 
+// Convert a single seconds number into the MT days, hours, minutes and seconds duration.
 func toSeconds(seconds uint32) string {
 	dur := time.Duration(seconds) * time.Second
 	str := ""
@@ -199,10 +199,9 @@ func (mt *Mikrotik) toFQDN(s string) string {
 	return s
 }
 
-func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
-
-	cancel := mt.startDeadline(5 * time.Second)
-	reply, err := mt.client.Run("/ip/dns/static/print", ".proplist=type")
+func (mt *Mikrotik) fetchDNSlist(ctx context.Context) (map[string]dns.RR, error) {
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	reply, err := mt.client.RunContext(rctx, "/ip/dns/static/print", ".proplist=type")
 	cancel()
 	if err != nil {
 		return nil, err
@@ -286,10 +285,10 @@ func (mt *Mikrotik) fetchDNSlist() (map[string]dns.RR, error) {
 }
 
 // fetchDHCP returns a map of all the static DHCP leases on the Mikrotik.
-func (mt *Mikrotik) fetchDHCP() (map[string]DHCP, error) {
+func (mt *Mikrotik) fetchDHCP(ctx context.Context) (map[string]DHCP, error) {
 
-	cancel := mt.startDeadline(5 * time.Second)
-	reply, err := mt.client.Run("/ip/dhcp-server/lease/print")
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	reply, err := mt.client.RunContext(rctx, "/ip/dhcp-server/lease/print")
 	cancel()
 	if err != nil {
 		return nil, err
@@ -307,10 +306,9 @@ func (mt *Mikrotik) fetchDHCP() (map[string]DHCP, error) {
 }
 
 // fetchDHCPNets returns a map of active dhcp server and the ip range they listen to.
-func (mt *Mikrotik) fetchDHCPNets() (map[string][]*net.IPNet, error) {
-
-	cancel := mt.startDeadline(5 * time.Second)
-	reply, err := mt.client.Run("/ip/address/print")
+func (mt *Mikrotik) fetchDHCPNets(ctx context.Context) (map[string][]*net.IPNet, error) {
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	reply, err := mt.client.RunContext(rctx, "/ip/address/print")
 	cancel()
 	if err != nil {
 		return nil, err
@@ -332,8 +330,8 @@ func (mt *Mikrotik) fetchDHCPNets() (map[string][]*net.IPNet, error) {
 		}
 	}
 
-	cancel = mt.startDeadline(5 * time.Second)
-	reply, err = mt.client.Run("/ip/dhcp-server/print")
+	rctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+	reply, err = mt.client.RunContext(rctx, "/ip/dhcp-server/print")
 	cancel()
 	if err != nil {
 		return nil, err
@@ -362,7 +360,7 @@ func (mt *Mikrotik) fetchDHCPNets() (map[string][]*net.IPNet, error) {
 // spit out an error which in the current implementation leads to a program
 // restart. For all timeouts != 0, the index returned over the Mikrotik
 // connection is stored, together with the IP itself, in the dynlist entry.
-func (mt *Mikrotik) AddDNS(rr dns.RR, comment string) error {
+func (mt *Mikrotik) AddDNS(ctx context.Context, rr dns.RR, comment string) error {
 	if *debug || *verbose {
 		defer log.Printf("%s: AddDNS(%s) finished", mt.Name, rr)
 	}
@@ -425,8 +423,8 @@ func (mt *Mikrotik) AddDNS(rr dns.RR, comment string) error {
 	if *debug {
 		return nil
 	}
-	cancel := mt.startDeadline(5 * time.Second)
-	reply, err := mt.client.RunArgs(args)
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	reply, err := mt.client.RunArgsContext(rctx, args)
 	cancel()
 	if err != nil {
 		if strings.Contains(err.Error(), "already have") {
@@ -441,7 +439,7 @@ func (mt *Mikrotik) AddDNS(rr dns.RR, comment string) error {
 }
 
 // DelDNS removes an DNS entry from the Mikrotik.
-func (mt *Mikrotik) DelDNS(entry string) error {
+func (mt *Mikrotik) DelDNS(ctx context.Context, entry string) error {
 	// Protect against racing DelIP/AddIPs.
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
@@ -449,16 +447,16 @@ func (mt *Mikrotik) DelDNS(entry string) error {
 		return nil
 	}
 
-	cancel := mt.startDeadline(5 * time.Second)
 	selector := fmt.Sprintf("=.id=%s", entry)
-	_, err := mt.client.Run("/ip/dns/static/remove", selector)
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	_, err := mt.client.RunContext(rctx, "/ip/dns/static/remove", selector)
 	cancel()
 
 	return err
 }
 
 // AddDHCP adds a DHCP entry for the given argument.
-func (mt *Mikrotik) AddDHCP(d DHCP) error {
+func (mt *Mikrotik) AddDHCP(ctx context.Context, d DHCP) error {
 	if *debug || *verbose {
 		defer log.Printf("%s: AddDHCP(%s) finished", mt.Name, d)
 	}
@@ -481,8 +479,8 @@ func (mt *Mikrotik) AddDHCP(d DHCP) error {
 		fmt.Sprintf("=mac-address=%s", d.MAC),
 		fmt.Sprintf("=server=%s", d.Server),
 	}
-	cancel := mt.startDeadline(5 * time.Second)
-	reply, err := mt.client.RunArgs(args)
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	reply, err := mt.client.RunArgsContext(rctx, args)
 	cancel()
 	if err != nil {
 		//if strings.Contains(err.Error(), "already have") {
@@ -497,7 +495,7 @@ func (mt *Mikrotik) AddDHCP(d DHCP) error {
 }
 
 // DelDHCP removes an DHCP entry from the Mikrotik.
-func (mt *Mikrotik) DelDHCP(entry string) error {
+func (mt *Mikrotik) DelDHCP(ctx context.Context, entry string) error {
 	// Protect against racing DelIP/AddIPs.
 	mt.lock.Lock()
 	defer mt.lock.Unlock()
@@ -505,31 +503,10 @@ func (mt *Mikrotik) DelDHCP(entry string) error {
 		return nil
 	}
 
-	cancel := mt.startDeadline(5 * time.Second)
 	selector := fmt.Sprintf("=.id=%s", entry)
-	_, err := mt.client.Run("/ip/dhcp-server/lease/remove", selector)
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	_, err := mt.client.RunContext(rctx, "/ip/dhcp-server/lease/remove", selector)
 	cancel()
 
 	return err
-}
-
-// fetchVersion returns the active running firmware version.
-func (mt *Mikrotik) fetchVersion() (*semver.Version, error) {
-	cancel := mt.startDeadline(5 * time.Second)
-	reply, err := mt.client.Run("/system/routerboard/print")
-	cancel()
-	if err != nil {
-		return nil, fmt.Errorf("fetchVersion=%v", err)
-	}
-	for _, re := range reply.Re {
-		if v, ok := re.Map["current-firmware"]; ok {
-			return semver.NewVersion(v)
-		}
-	}
-	return nil, fmt.Errorf("missing `current-firmware`")
-}
-
-// Close closes the session with the mikrotik.
-func (mt *Mikrotik) Close() {
-	mt.client.Close()
 }
