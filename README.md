@@ -2,10 +2,8 @@
 
 [![GoDoc](https://godoc.org/github.com/middelink/mikrotik-dns?status.svg)](https://godoc.org/github.com/middelink/mikrotik-dns)
 [![License](https://img.shields.io/github/license/middelink/mikrotik-dns.svg)](https://github.com/middelink/mikrotik-dns/blob/master/LICENSE)
-[![Build Status](https://travis-ci.org/middelink/mikrotik-dns.svg?branch=master)](https://travis-ci.org/middelink/mikrotik-dns)
-[![Coverage Status](https://coveralls.io/repos/github/middelink/mikrotik-dns/badge.svg?branch=master)](https://coveralls.io/github/middelink/mikrotik-dns?branch=master)
+[![Build Status](https://github.com/middelink/mikrotik-dns/workflows/test/badge.svg)](https://github.com/middelink/mikrotik-dns/actions?query=workflow%3Atest)
 [![Go Report Card](https://goreportcard.com/badge/github.com/middelink/mikrotik-dns)](https://goreportcard.com/report/github.com/middelink/mikrotik-dns)
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fmiddelink%2Fmikrotik-dns.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fmiddelink%2Fmikrotik-dns?ref=badge_shield)
 
 ## TL;DR
 
