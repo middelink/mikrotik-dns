@@ -7,7 +7,7 @@ toolchain go1.24.0
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
 	github.com/go-routeros/routeros/v3 v3.0.1
-	github.com/miekg/dns v1.1.67
+	github.com/miekg/dns v1.1.68
 )
 
 require (
