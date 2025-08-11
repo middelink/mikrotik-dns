@@ -274,6 +274,12 @@ func (mt *Mikrotik) FetchDNSlist(ctx context.Context) (map[string]dns.RR, error)
 			r := new(dns.NULL)
 			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeNULL, Class: dns.ClassINET, Ttl: ttl}
 			rr = r
+		case "FWD":
+			//dns entry: "!re @ [{`.id` `*56F`} {`regexp` `^.*\.d\.polyware\.nl$`} {`type` `FWD`} {`forward-to` `192.168.40.44`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
+			r := new(dns.NULL)
+			r.Hdr = dns.RR_Header{Name: name, Rrtype: dns.TypeNULL, Class: dns.ClassINET, Ttl: ttl}
+			r.Data = re.Map["forward-to"]
+			rr = r
 		default:
 			return nil, fmt.Errorf("unknown dns type: %v", re)
 		}
@@ -412,6 +418,10 @@ func (mt *Mikrotik) AddDNS(ctx context.Context, rr dns.RR, comment string) error
 		//dns entry: "!re @ [{`.id` `*15`} {`name` `4`} {`type` `TXT`} {`text` `spf thingy`} {`ttl` `1d`} {`dynamic` `false`} {`disabled` `false`}]"
 		args = append(args, "=type=TXT")
 		args = append(args, fmt.Sprintf("=text=%s", strings.Join(rr.(*dns.TXT).Txt, "\n")))
+	case dns.TypeNULL:
+		//dns entry: ;*.d.polyware.nl.	86400	IN	NULL	192.168.40.44
+		args = append(args, "=type=FWD")
+		args = append(args, fmt.Sprintf("=forward-to=%s", rr.(*dns.NULL).Data))
 	default:
 		return fmt.Errorf("unknown dns type: %v", rr)
 	}

@@ -125,7 +125,12 @@ Unknown entries from the DHCP table will be removed!
 				break
 			}
 
+			cmtMap := mapComments(scanner.Comment())
 			if _, ok := mtRRs[rr.Header().Rrtype]; ok {
+				if _, ok := cmtMap["ignore"]; ok {
+					continue
+				}
+
 				found := false
 				for _, p := range dnsPrefixes {
 					if strings.HasPrefix(rr.Header().Name, p) {
@@ -134,6 +139,14 @@ Unknown entries from the DHCP table will be removed!
 					}
 				}
 				if !found {
+					if cmtMap["forward"] != "" {
+						// Map a forward line to RR NULL so we can map it to MT dns.
+						r := new(dns.NULL)
+						r.Hdr = dns.RR_Header{Name: rr.Header().Name, Rrtype: dns.TypeNULL, Class: dns.ClassINET, Ttl: rr.Header().Ttl}
+						r.Data = cmtMap["forward"]
+						rr = r
+					}
+
 					for _, zoneRR := range zoneRRs {
 						if dns.IsDuplicate(rr, zoneRR) && rr.Header().Ttl == zoneRR.Header().Ttl {
 							log.Fatalf("Duplicate entry found (%v)\n", rr.Header().Name)
@@ -142,9 +155,7 @@ Unknown entries from the DHCP table will be removed!
 					zoneRRs = append(zoneRRs, rr)
 				}
 			}
-
 			if *useDHCP {
-				cmtMap := mapComments(scanner.Comment())
 				if rr.Header().Rrtype == dns.TypeA && cmtMap["dhcp"] != "" {
 					hw, err := net.ParseMAC(cmtMap["dhcp"])
 					if err != nil {

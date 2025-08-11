@@ -14,6 +14,10 @@
   CNAME, MX, NS, SRV and TXT)
 * When there is a dhcp:<mac address> is added to A RRs, the tool is capable
   of maintaining the static leases of one or more dhcp servers on the Mikrotik.
+* When there is a forward:<ip address> added to a RR, the tool translates it
+  to a FWD entry on the Mikrotik DNS side.
+* When there is a 'ignore' added to the RR, the tool will not copy the record
+  over, but it will remove it if it exists at the Mikrotik side.
 
 > :warning: When used this tool will *remove all DNS and DHCP leases* which are not in the source zone(s)!
 
@@ -79,6 +83,8 @@ localhost	IN A		127.0.0.1
 @		IN A		192.168.10.10 ; dhcp:01:23:45:67:89:ab
 		IN AAAA		2a02:ff:ff:ffff:ffff:ff:ffff:ffff
 		IN MX		50 smtp
+
+*.d     IN A        192.168.10.12; forward:192.168.10.10
 
 $GENERATE 128-254 dhcp${-127,3} A 192.168.10.$
 ```
