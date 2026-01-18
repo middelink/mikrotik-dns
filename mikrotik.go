@@ -195,7 +195,7 @@ func (mt *Mikrotik) toFQDN(s string) string {
 	return s
 }
 
-// FetchDNSList returns a map of resource records, indexed by the name.
+// FetchDNSlist returns a map of resource records, indexed by the name.
 // It handles regexps and ensures names are fqdn (ending with a dot).
 func (mt *Mikrotik) FetchDNSlist(ctx context.Context) (map[string]dns.RR, error) {
 	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -326,11 +326,7 @@ func (mt *Mikrotik) FetchDHCPNets(ctx context.Context) (map[string][]*net.IPNet,
 				return nil, err
 			}
 			name := re.Map["actual-interface"]
-			if intfs[name] == nil {
-				intfs[name] = []*net.IPNet{ipnet}
-			} else {
-				intfs[name] = append(intfs[name], ipnet)
-			}
+			intfs[name] = append(intfs[name], ipnet)
 		}
 	}
 
